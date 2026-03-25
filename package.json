@@ -1,0 +1,15 @@
+{
+  "name": "surtoa-imagine-cli",
+  "version": "0.1.0",
+  "description": "CLI for generating images via Surtoa imagine endpoints",
+  "type": "module",
+  "bin": {
+    "imagine": "./bin/imagine.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
