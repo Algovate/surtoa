@@ -26,10 +26,10 @@ type HelpSection = {
 export const HELP_SECTIONS: Record<HelpTopic, HelpSection> = {
   root: {
     usage: [
-      "imagine image generate --prompt \"...\" [options]",
-      "imagine video generate --prompt \"...\" [options]",
-      "imagine text generate --prompt \"...\" [options]",
-      "imagine models list [options]",
+      "surtoa image generate --prompt \"...\" [options]",
+      "surtoa video generate --prompt \"...\" [options]",
+      "surtoa text generate --prompt \"...\" [options]",
+      "surtoa models list [options]",
     ],
     commands: [
       { name: "image generate", description: "Generate images" },
@@ -39,7 +39,7 @@ export const HELP_SECTIONS: Record<HelpTopic, HelpSection> = {
     ],
   },
   image: {
-    usage: ["imagine image generate --prompt \"...\" [options]"],
+    usage: ["surtoa image generate --prompt \"...\" [options]"],
     options: [
       { flag: "--prompt <text>", description: "Prompt to generate" },
       { flag: "--ratio <value>", description: `One of: ${IMAGE_RATIOS.join(", ")} (default: 2:3)` },
@@ -53,7 +53,7 @@ export const HELP_SECTIONS: Record<HelpTopic, HelpSection> = {
     ],
   },
   video: {
-    usage: ["imagine video generate --prompt \"...\" [options]"],
+    usage: ["surtoa video generate --prompt \"...\" [options]"],
     options: [
       { flag: "--prompt <text>", description: "Prompt to generate" },
       { flag: "--ratio <value>", description: `One of: ${VIDEO_RATIOS.join(", ")} (default: 3:2)` },
@@ -69,7 +69,7 @@ export const HELP_SECTIONS: Record<HelpTopic, HelpSection> = {
     ],
   },
   text: {
-    usage: ["imagine text generate --prompt \"...\" [options]"],
+    usage: ["surtoa text generate --prompt \"...\" [options]"],
     options: [
       { flag: "--prompt <text>", description: "Prompt to generate" },
       { flag: "--model <id>", description: `Model ID (default: ${DEFAULT_TEXT_MODEL})` },
@@ -84,7 +84,7 @@ export const HELP_SECTIONS: Record<HelpTopic, HelpSection> = {
     ],
   },
   models: {
-    usage: ["imagine models list [options]"],
+    usage: ["surtoa models list [options]"],
     options: [
       { flag: "--function-key <key>", description: "Optional function key" },
       { flag: "--json", description: "Print raw JSON" },

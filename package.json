@@ -1,19 +1,37 @@
 {
-  "name": "surtoa-imagine-cli",
+  "name": "surtoa",
   "version": "0.1.0",
   "description": "CLI for generating images via Surtoa imagine endpoints",
+  "keywords": [
+    "surtoa",
+    "cli",
+    "image-generation",
+    "video-generation",
+    "text-generation"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Algovate/surtoa.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Algovate/surtoa/issues"
+  },
+  "homepage": "https://github.com/Algovate/surtoa#readme",
   "type": "module",
   "bin": {
-    "imagine": "./dist/bin/imagine.js"
+    "surtoa": "./dist/bin/imagine.js"
   },
   "files": [
-    "dist/",
+    "dist/bin/",
+    "dist/src/",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "rm -rf dist && tsc -p tsconfig.json",
+    "pack:check": "npm pack --dry-run --cache .npm-cache",
     "prepack": "npm run build",
     "prepare": "npm run build",
+    "release:check": "npm run typecheck && npm test && npm run pack:check",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test dist/test/**/*.test.js"
   },

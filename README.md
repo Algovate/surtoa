@@ -4,16 +4,25 @@ CLI for interacting with Surtoa function endpoints from the terminal.
 
 Current commands:
 
-- `imagine image generate`
-- `imagine video generate`
-- `imagine text generate`
-- `imagine models list`
+- `surtoa image generate`
+- `surtoa video generate`
+- `surtoa text generate`
+- `surtoa models list`
 
 ## Requirements
 
 - Node.js `>= 22`
 
 ## Install
+
+After publishing to npm:
+
+```bash
+npm install -g surtoa
+surtoa --help
+```
+
+For local development:
 
 Install dependencies:
 
@@ -37,7 +46,7 @@ Or link the binary locally:
 
 ```bash
 npm link
-imagine --help
+surtoa --help
 ```
 
 ## Commands
@@ -218,6 +227,18 @@ Run tests:
 
 ```bash
 npm test
+```
+
+Run the full publish preflight:
+
+```bash
+npm run release:check
+```
+
+Publish to npm:
+
+```bash
+npm publish
 ```
 
 Show command help:
