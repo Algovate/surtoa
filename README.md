@@ -1,5 +1,7 @@
 # Surtoa CLI
 
+[![npm version](https://img.shields.io/npm/v/surtoa)](https://www.npmjs.com/package/surtoa)
+
 CLI for interacting with Surtoa function endpoints from the terminal.
 
 Current commands:
