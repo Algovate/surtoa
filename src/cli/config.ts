@@ -16,6 +16,7 @@ export const IMAGE_MODES = ["auto", "ws", "sse"] as const satisfies readonly Ima
 export const VIDEO_RATIOS = ["3:2", "2:3", "16:9", "9:16", "1:1"] as const satisfies readonly VideoRatio[];
 export const VIDEO_RESOLUTIONS = ["480p", "720p"] as const satisfies readonly VideoResolution[];
 export const VIDEO_PRESETS = ["normal", "fun", "spicy", "custom"] as const satisfies readonly VideoPreset[];
+export const TASK_KINDS = ["image", "video"] as const;
 
 type HelpSection = {
   usage: string[];
@@ -34,8 +35,13 @@ export const HELP_SECTIONS: Record<HelpTopic, HelpSection> = {
     commands: [
       { name: "image generate", description: "Generate images" },
       { name: "video generate", description: "Generate video" },
+      { name: "video download", description: "Download video by URL" },
       { name: "text generate", description: "Generate text" },
       { name: "models list", description: "List available models" },
+      { name: "task stop", description: "Stop an image or video task" },
+      { name: "auth set-key", description: "Store default function key" },
+      { name: "auth show", description: "Show stored function key status" },
+      { name: "auth clear", description: "Clear stored function key" },
     ],
   },
   image: {
@@ -53,7 +59,10 @@ export const HELP_SECTIONS: Record<HelpTopic, HelpSection> = {
     ],
   },
   video: {
-    usage: ["surtoa video generate --prompt \"...\" [options]"],
+    usage: [
+      "surtoa video generate --prompt \"...\" [options]",
+      "surtoa video download --url \"...\" [options]",
+    ],
     options: [
       { flag: "--prompt <text>", description: "Prompt to generate" },
       { flag: "--ratio <value>", description: `One of: ${VIDEO_RATIOS.join(", ")} (default: 3:2)` },
@@ -64,6 +73,9 @@ export const HELP_SECTIONS: Record<HelpTopic, HelpSection> = {
       { flag: "--function-key <key>", description: "Optional function key" },
       { flag: "--image-url <url>", description: `Reference image URL or data URL, repeatable, max ${MAX_VIDEO_REFERENCES}` },
       { flag: "--image-file <path>", description: `Local reference image path, repeatable, max ${MAX_VIDEO_REFERENCES}` },
+      { flag: "--download", description: "Download final video file (default: true)" },
+      { flag: "--no-download", description: "Skip file download and only print resolved URL" },
+      { flag: "--url <url>", description: "Video URL for download subcommand" },
       { flag: "--debug", description: "Print protocol debug logs" },
       { flag: "--help", description: "Show help" },
     ],
@@ -91,5 +103,23 @@ export const HELP_SECTIONS: Record<HelpTopic, HelpSection> = {
       { flag: "--debug", description: "Print protocol debug logs" },
       { flag: "--help", description: "Show help" },
     ],
+  },
+  task: {
+    usage: ["surtoa task stop --kind <image|video> --task-id \"...\" [options]"],
+    options: [
+      { flag: "--kind <image|video>", description: "Task category to stop" },
+      { flag: "--task-id <id>", description: "Task id to stop" },
+      { flag: "--function-key <key>", description: "Optional function key" },
+      { flag: "--debug", description: "Print protocol debug logs" },
+      { flag: "--help", description: "Show help" },
+    ],
+  },
+  auth: {
+    usage: [
+      "surtoa auth set-key <key>",
+      "surtoa auth show",
+      "surtoa auth clear",
+    ],
+    options: [],
   },
 };

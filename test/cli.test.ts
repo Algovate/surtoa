@@ -54,8 +54,27 @@ test("parseCliArgs supports video subcommand", () => {
     throw new Error("expected video command");
   }
   assert.equal(parsed.kind, "video");
+  assert.equal(parsed.command, "video generate");
   assert.equal(parsed.ratio, "3:2");
   assert.equal(parsed.length, 6);
+  assert.equal(parsed.download, true);
+});
+
+test("parseCliArgs supports video download subcommand", () => {
+  const parsed = parseCliArgs(["video", "download", "--url", "https://example.com/x.mp4"]);
+  if ("help" in parsed || parsed.kind !== "video" || parsed.command !== "video download") {
+    throw new Error("expected video download command");
+  }
+  assert.equal(parsed.url, "https://example.com/x.mp4");
+  assert.equal(parsed.out, "./output");
+});
+
+test("parseCliArgs supports video generate no-download", () => {
+  const parsed = parseCliArgs(["video", "generate", "--prompt", "clip", "--no-download"]);
+  if ("help" in parsed || parsed.kind !== "video" || parsed.command !== "video generate") {
+    throw new Error("expected video generate command");
+  }
+  assert.equal(parsed.download, false);
 });
 
 test("parseCliArgs validates video reference exclusivity", () => {
@@ -79,6 +98,17 @@ test("parseCliArgs validates video preset", () => {
   assert.throws(
     () => parseCliArgs(["video", "generate", "--prompt", "clip", "--preset", "bad"]),
     /--preset must be one of/,
+  );
+});
+
+test("parseCliArgs requires video download url", () => {
+  assert.throws(() => parseCliArgs(["video", "download"]), /--url is required/);
+});
+
+test("parseCliArgs rejects conflicting video download flags", () => {
+  assert.throws(
+    () => parseCliArgs(["video", "generate", "--prompt", "clip", "--download", "--no-download"]),
+    /cannot be used together/,
   );
 });
 
@@ -132,6 +162,53 @@ test("parseCliArgs supports models list subcommand", () => {
   assert.equal(parsed.kind, "models");
   assert.equal(parsed.command, "models list");
   assert.equal(parsed.json, false);
+});
+
+test("parseCliArgs supports task stop subcommand", () => {
+  const parsed = parseCliArgs(["task", "stop", "--kind", "video", "--task-id", "task-123"]);
+  if ("help" in parsed || parsed.kind !== "task") {
+    throw new Error("expected task command");
+  }
+  assert.equal(parsed.command, "task stop");
+  assert.equal(parsed.taskKind, "video");
+  assert.equal(parsed.taskId, "task-123");
+});
+
+test("parseCliArgs validates task stop kind", () => {
+  assert.throws(
+    () => parseCliArgs(["task", "stop", "--kind", "text", "--task-id", "task-123"]),
+    /--kind must be one of/,
+  );
+});
+
+test("parseCliArgs requires task stop task-id", () => {
+  assert.throws(() => parseCliArgs(["task", "stop", "--kind", "video"]), /--task-id is required/);
+});
+
+test("parseCliArgs supports auth set-key", () => {
+  const parsed = parseCliArgs(["auth", "set-key", "secret-key"]);
+  if ("help" in parsed || parsed.kind !== "auth" || parsed.command !== "auth set-key") {
+    throw new Error("expected auth set-key command");
+  }
+  assert.equal(parsed.functionKey, "secret-key");
+});
+
+test("parseCliArgs supports auth show", () => {
+  const parsed = parseCliArgs(["auth", "show"]);
+  if ("help" in parsed || parsed.kind !== "auth" || parsed.command !== "auth show") {
+    throw new Error("expected auth show command");
+  }
+});
+
+test("parseCliArgs supports auth clear", () => {
+  const parsed = parseCliArgs(["auth", "clear"]);
+  if ("help" in parsed || parsed.kind !== "auth" || parsed.command !== "auth clear") {
+    throw new Error("expected auth clear command");
+  }
+});
+
+test("parseCliArgs requires auth set-key value", () => {
+  assert.throws(() => parseCliArgs(["auth", "set-key"]), /function key is required/);
 });
 
 test("inferImageExtension detects common image types", () => {

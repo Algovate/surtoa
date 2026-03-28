@@ -1,4 +1,4 @@
-export type HelpTopic = "root" | "image" | "video" | "text" | "models";
+export type HelpTopic = "root" | "image" | "video" | "text" | "models" | "task" | "auth";
 
 export type ImageRatio = "2:3" | "1:1" | "3:2" | "16:9" | "9:16";
 export type ImageMode = "auto" | "ws" | "sse";
@@ -37,6 +37,15 @@ export type VideoGenerateArgs = {
   functionKey: string;
   imageUrls: string[];
   imageFiles: string[];
+  download: boolean;
+  debug: boolean;
+};
+
+export type VideoDownloadArgs = {
+  kind: "video";
+  command: "video download";
+  url: string;
+  out: string;
   debug: boolean;
 };
 
@@ -62,12 +71,44 @@ export type ModelsListArgs = {
   debug: boolean;
 };
 
+export type TaskKind = "image" | "video";
+
+export type TaskStopArgs = {
+  kind: "task";
+  command: "task stop";
+  taskKind: TaskKind;
+  taskId: string;
+  functionKey: string;
+  debug: boolean;
+};
+
+export type AuthSetKeyArgs = {
+  kind: "auth";
+  command: "auth set-key";
+  functionKey: string;
+};
+
+export type AuthShowArgs = {
+  kind: "auth";
+  command: "auth show";
+};
+
+export type AuthClearArgs = {
+  kind: "auth";
+  command: "auth clear";
+};
+
 export type ParsedCliArgs =
   | HelpCommand
   | ImageGenerateArgs
   | VideoGenerateArgs
+  | VideoDownloadArgs
   | TextGenerateArgs
-  | ModelsListArgs;
+  | ModelsListArgs
+  | TaskStopArgs
+  | AuthSetKeyArgs
+  | AuthShowArgs
+  | AuthClearArgs;
 
 export type RunnableCommand = Exclude<ParsedCliArgs, HelpCommand>;
 

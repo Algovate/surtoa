@@ -1,3 +1,5 @@
+import * as path from "node:path";
+
 import {
   buildImageOutputFilename,
   buildVideoOutputFilename,
@@ -13,6 +15,13 @@ import { listModels } from "../clients/models.js";
 import { startTextCompletion } from "../clients/text.js";
 import { startVideoTask, stopVideoTasks, streamVideoTask } from "../clients/video.js";
 import {
+  clearConfiguredFunctionKey,
+  getConfiguredFunctionKey,
+  maskFunctionKey,
+  setConfiguredFunctionKey,
+} from "./auth.js";
+import {
+  printDownloadSkipped,
   printImagePartial,
   printImageSaved,
   printResolvedUrl,
@@ -25,12 +34,15 @@ import {
 } from "./feedback.js";
 
 import type {
+  AuthSetKeyArgs,
   ChatMessage,
   FileContentPart,
   ImageGenerateArgs,
   ModelsListArgs,
+  TaskStopArgs,
   TextContentPart,
   TextGenerateArgs,
+  VideoDownloadArgs,
   VideoGenerateArgs,
 } from "../shared/types.js";
 
@@ -55,7 +67,12 @@ function createCounts(): RunCounts {
   return { success: 0, failed: 0 };
 }
 
+async function resolveFunctionKey(value: string): Promise<string> {
+  return value || (await getConfiguredFunctionKey());
+}
+
 export async function runImageGenerate(options: ImageGenerateArgs): Promise<void> {
+  const functionKey = await resolveFunctionKey(options.functionKey);
   const outputDir = await ensureOutputDir(options.out);
   const startedAt = Date.now();
   const timestamp = startedAt;
@@ -72,7 +89,7 @@ export async function runImageGenerate(options: ImageGenerateArgs): Promise<void
     for (const controller of taskAbortControllers.values()) {
       controller.abort();
     }
-    await stopTasks({ taskIds, functionKey: options.functionKey, debug: options.debug });
+    await stopTasks({ taskIds, functionKey, debug: options.debug });
     process.exitCode = 1;
   });
 
@@ -82,7 +99,7 @@ export async function runImageGenerate(options: ImageGenerateArgs): Promise<void
         prompt: options.prompt,
         aspectRatio: options.ratio,
         nsfw: options.nsfw,
-        functionKey: options.functionKey,
+        functionKey,
         debug: options.debug,
       });
       taskIds.push(taskId);
@@ -99,7 +116,7 @@ export async function runImageGenerate(options: ImageGenerateArgs): Promise<void
           await streamTask({
             taskId,
             mode: options.mode,
-            functionKey: options.functionKey,
+            functionKey,
             signal: controller.signal,
             debug: options.debug,
             startPayload: {
@@ -159,7 +176,7 @@ export async function runImageGenerate(options: ImageGenerateArgs): Promise<void
     );
   } finally {
     restoreSignals();
-    await stopTasks({ taskIds, functionKey: options.functionKey, debug: options.debug });
+    await stopTasks({ taskIds, functionKey, debug: options.debug });
   }
 
   const elapsedMs = Date.now() - startedAt;
@@ -167,6 +184,7 @@ export async function runImageGenerate(options: ImageGenerateArgs): Promise<void
 }
 
 export async function runVideoGenerate(options: VideoGenerateArgs): Promise<void> {
+  const functionKey = await resolveFunctionKey(options.functionKey);
   const outputDir = await ensureOutputDir(options.out);
   const startedAt = Date.now();
   const imageUrls = options.imageFiles.length
@@ -180,7 +198,7 @@ export async function runVideoGenerate(options: VideoGenerateArgs): Promise<void
     videoLength: options.length,
     resolutionName: options.resolution,
     preset: options.preset,
-    functionKey: options.functionKey,
+    functionKey,
     debug: options.debug,
   });
   printTaskStarted({ taskId });
@@ -198,14 +216,14 @@ export async function runVideoGenerate(options: VideoGenerateArgs): Promise<void
     shuttingDown = true;
     printTaskStopping("task");
     controller.abort();
-    await stopVideoTasks({ taskIds: [taskId], functionKey: options.functionKey, debug: options.debug });
+    await stopVideoTasks({ taskIds: [taskId], functionKey, debug: options.debug });
     process.exitCode = 1;
   });
 
   try {
     await streamVideoTask({
       taskId,
-      functionKey: options.functionKey,
+      functionKey,
       signal: controller.signal,
       debug: options.debug,
       onEvent: async (event) => {
@@ -234,6 +252,9 @@ export async function runVideoGenerate(options: VideoGenerateArgs): Promise<void
 
     if (!resolvedUrl) {
       failed = 1;
+    } else if (!options.download) {
+      success = 1;
+      printDownloadSkipped();
     } else {
       const filename = buildVideoOutputFilename({ timestamp, taskId, extension: "mp4" });
       const fullPath = await saveBinaryUrlToFile({
@@ -249,11 +270,56 @@ export async function runVideoGenerate(options: VideoGenerateArgs): Promise<void
     printTaskError({ taskId }, error);
   } finally {
     restoreSignals();
-    await stopVideoTasks({ taskIds: [taskId], functionKey: options.functionKey, debug: options.debug });
+    await stopVideoTasks({ taskIds: [taskId], functionKey, debug: options.debug });
   }
 
   const elapsedMs = Date.now() - startedAt;
   printSummary({ success, failed, elapsedMs, outputDir });
+}
+
+function inferFilenameFromUrl(url: string): string {
+  try {
+    const pathname = new URL(url).pathname;
+    const basename = path.basename(pathname);
+    if (basename && basename !== "/" && path.extname(basename)) {
+      return basename;
+    }
+  } catch {
+    // ignore
+  }
+  return `video_${Date.now()}.mp4`;
+}
+
+function resolveDownloadTarget(url: string, out: string): { outputDir: string; filename: string } {
+  const ext = path.extname(out).toLowerCase();
+  if (ext) {
+    return {
+      outputDir: path.dirname(out),
+      filename: path.basename(out),
+    };
+  }
+  return {
+    outputDir: out,
+    filename: inferFilenameFromUrl(url),
+  };
+}
+
+export async function runVideoDownload(options: VideoDownloadArgs): Promise<void> {
+  const startedAt = Date.now();
+  const { outputDir, filename } = resolveDownloadTarget(options.url, options.out);
+  const ensuredOutputDir = await ensureOutputDir(outputDir);
+  const fullPath = await saveBinaryUrlToFile({
+    url: options.url,
+    outputDir: ensuredOutputDir,
+    filename,
+  });
+  printSavedFile(fullPath);
+  printSummary({
+    success: 1,
+    failed: 0,
+    elapsedMs: Date.now() - startedAt,
+    outputDir: ensuredOutputDir,
+  });
 }
 
 async function buildTextMessages(options: TextGenerateArgs): Promise<ChatMessage[]> {
@@ -283,6 +349,7 @@ async function buildTextMessages(options: TextGenerateArgs): Promise<ChatMessage
 }
 
 export async function runTextGenerate(options: TextGenerateArgs): Promise<void> {
+  const functionKey = await resolveFunctionKey(options.functionKey);
   const messages = await buildTextMessages(options);
   const controller = new AbortController();
   let output = "";
@@ -299,7 +366,7 @@ export async function runTextGenerate(options: TextGenerateArgs): Promise<void> 
       messages,
       temperature: options.temperature,
       topP: options.topP,
-      functionKey: options.functionKey,
+      functionKey,
       debug: options.debug,
       signal: controller.signal,
       onDelta: (delta) => {
@@ -330,8 +397,9 @@ export async function runTextGenerate(options: TextGenerateArgs): Promise<void> 
 }
 
 export async function runModelsList(options: ModelsListArgs): Promise<void> {
+  const functionKey = await resolveFunctionKey(options.functionKey);
   const { payload, items } = await listModels({
-    functionKey: options.functionKey,
+    functionKey,
     debug: options.debug,
   });
 
@@ -345,4 +413,42 @@ export async function runModelsList(options: ModelsListArgs): Promise<void> {
       console.log(item.id);
     }
   }
+}
+
+export async function runTaskStop(options: TaskStopArgs): Promise<void> {
+  const functionKey = await resolveFunctionKey(options.functionKey);
+  if (options.taskKind === "image") {
+    await stopTasks({
+      taskIds: [options.taskId],
+      functionKey,
+      debug: options.debug,
+    });
+  } else {
+    await stopVideoTasks({
+      taskIds: [options.taskId],
+      functionKey,
+      debug: options.debug,
+    });
+  }
+
+  console.log(`stop requested kind=${options.taskKind} taskId=${options.taskId}`);
+}
+
+export async function runAuthSetKey(options: AuthSetKeyArgs): Promise<void> {
+  await setConfiguredFunctionKey(options.functionKey);
+  console.log(`saved function key ${maskFunctionKey(options.functionKey)}`);
+}
+
+export async function runAuthShow(): Promise<void> {
+  const functionKey = await getConfiguredFunctionKey();
+  if (!functionKey) {
+    console.log("function key not configured");
+    return;
+  }
+  console.log(`configured function key ${maskFunctionKey(functionKey)}`);
+}
+
+export async function runAuthClear(): Promise<void> {
+  await clearConfiguredFunctionKey();
+  console.log("cleared function key");
 }

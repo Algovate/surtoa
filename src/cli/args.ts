@@ -4,6 +4,7 @@ import {
   IMAGE_MODES,
   IMAGE_RATIOS,
   MAX_VIDEO_REFERENCES,
+  TASK_KINDS,
   VIDEO_PRESETS,
   VIDEO_RATIOS,
   VIDEO_RESOLUTIONS,
@@ -14,9 +15,15 @@ import type {
   ImageGenerateArgs,
   ImageMode,
   ImageRatio,
+  AuthClearArgs,
+  AuthSetKeyArgs,
+  AuthShowArgs,
   ModelsListArgs,
   ParsedCliArgs,
+  TaskKind,
+  TaskStopArgs,
   TextGenerateArgs,
+  VideoDownloadArgs,
   VideoGenerateArgs,
   VideoPreset,
   VideoRatio,
@@ -28,6 +35,7 @@ const IMAGE_MODE_SET = new Set<ImageMode>(IMAGE_MODES);
 const VIDEO_RATIO_SET = new Set<VideoRatio>(VIDEO_RATIOS);
 const VIDEO_RESOLUTION_SET = new Set<VideoResolution>(VIDEO_RESOLUTIONS);
 const VIDEO_PRESET_SET = new Set<VideoPreset>(VIDEO_PRESETS);
+const TASK_KIND_SET = new Set<TaskKind>(TASK_KINDS);
 
 function parseBoolean(value: string, flagName: string): boolean {
   if (value === "true") return true;
@@ -75,10 +83,34 @@ function makeHelp(topic: HelpCommand["topic"]): HelpCommand {
   return { help: true, topic };
 }
 
-function parseImageGenerateArgs(rest: string[]): ImageGenerateArgs | HelpCommand {
+function parseCommandOptions<T extends Record<string, unknown>>({
+  args,
+  options,
+}: {
+  args: string[];
+  options: NonNullable<Parameters<typeof parseArgs>[0]>["options"];
+}): T {
   const { values } = parseArgs({
-    args: rest,
+    args,
     allowPositionals: false,
+    options,
+  });
+  return values as T;
+}
+
+function parseImageGenerateArgs(rest: string[]): ImageGenerateArgs | HelpCommand {
+  const values = parseCommandOptions<{
+    prompt?: string;
+    ratio: string;
+    count: string;
+    nsfw: string;
+    out: string;
+    "function-key"?: string;
+    mode: string;
+    debug: boolean;
+    help: boolean;
+  }>({
+    args: rest,
     options: {
       prompt: { type: "string" },
       ratio: { type: "string", default: "2:3" },
@@ -114,9 +146,22 @@ function parseImageGenerateArgs(rest: string[]): ImageGenerateArgs | HelpCommand
 }
 
 function parseVideoGenerateArgs(rest: string[]): VideoGenerateArgs | HelpCommand {
-  const { values } = parseArgs({
+  const values = parseCommandOptions<{
+    prompt?: string;
+    ratio: string;
+    length: string;
+    resolution: string;
+    preset: string;
+    out: string;
+    "function-key"?: string;
+    "image-url"?: string | string[];
+    "image-file"?: string | string[];
+    download?: boolean;
+    "no-download": boolean;
+    debug: boolean;
+    help: boolean;
+  }>({
     args: rest,
-    allowPositionals: false,
     options: {
       prompt: { type: "string" },
       ratio: { type: "string", default: "3:2" },
@@ -127,6 +172,8 @@ function parseVideoGenerateArgs(rest: string[]): VideoGenerateArgs | HelpCommand
       "function-key": { type: "string" },
       "image-url": { type: "string", multiple: true },
       "image-file": { type: "string", multiple: true },
+      download: { type: "boolean" },
+      "no-download": { type: "boolean", default: false },
       debug: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
@@ -146,6 +193,9 @@ function parseVideoGenerateArgs(rest: string[]): VideoGenerateArgs | HelpCommand
   if (imageUrls.length > MAX_VIDEO_REFERENCES || imageFiles.length > MAX_VIDEO_REFERENCES) {
     throw new Error("--image-url/--image-file supports at most 7 items");
   }
+  if (values.download && values["no-download"]) {
+    throw new Error("--download and --no-download cannot be used together");
+  }
 
   return {
     kind: "video",
@@ -163,14 +213,57 @@ function parseVideoGenerateArgs(rest: string[]): VideoGenerateArgs | HelpCommand
     functionKey: values["function-key"] || "",
     imageUrls,
     imageFiles,
+    download: values["no-download"] ? false : true,
+    debug: values.debug,
+  };
+}
+
+function parseVideoDownloadArgs(rest: string[]): VideoDownloadArgs | HelpCommand {
+  const values = parseCommandOptions<{
+    url?: string;
+    out: string;
+    debug: boolean;
+    help: boolean;
+  }>({
+    args: rest,
+    options: {
+      url: { type: "string" },
+      out: { type: "string", default: "./output" },
+      debug: { type: "boolean", default: false },
+      help: { type: "boolean", short: "h", default: false },
+    },
+  });
+
+  if (values.help) {
+    return makeHelp("video");
+  }
+  if (!values.url?.trim()) {
+    throw new Error("--url is required");
+  }
+
+  return {
+    kind: "video",
+    command: "video download",
+    url: values.url.trim(),
+    out: values.out,
     debug: values.debug,
   };
 }
 
 function parseTextGenerateArgs(rest: string[]): TextGenerateArgs | HelpCommand {
-  const { values } = parseArgs({
+  const values = parseCommandOptions<{
+    prompt?: string;
+    model: string;
+    system?: string;
+    temperature: string;
+    "top-p": string;
+    file?: string | string[];
+    out?: string;
+    "function-key"?: string;
+    debug: boolean;
+    help: boolean;
+  }>({
     args: rest,
-    allowPositionals: false,
     options: {
       prompt: { type: "string" },
       model: { type: "string", default: DEFAULT_TEXT_MODEL },
@@ -212,9 +305,13 @@ function parseTextGenerateArgs(rest: string[]): TextGenerateArgs | HelpCommand {
 }
 
 function parseModelsListArgs(rest: string[]): ModelsListArgs | HelpCommand {
-  const { values } = parseArgs({
+  const values = parseCommandOptions<{
+    "function-key"?: string;
+    json: boolean;
+    debug: boolean;
+    help: boolean;
+  }>({
     args: rest,
-    allowPositionals: false,
     options: {
       "function-key": { type: "string" },
       json: { type: "boolean", default: false },
@@ -233,6 +330,70 @@ function parseModelsListArgs(rest: string[]): ModelsListArgs | HelpCommand {
     functionKey: values["function-key"] || "",
     json: values.json,
     debug: values.debug,
+  };
+}
+
+function parseTaskStopArgs(rest: string[]): TaskStopArgs | HelpCommand {
+  const values = parseCommandOptions<{
+    kind?: string;
+    "task-id"?: string;
+    "function-key"?: string;
+    debug: boolean;
+    help: boolean;
+  }>({
+    args: rest,
+    options: {
+      kind: { type: "string" },
+      "task-id": { type: "string" },
+      "function-key": { type: "string" },
+      debug: { type: "boolean", default: false },
+      help: { type: "boolean", short: "h", default: false },
+    },
+  });
+
+  if (values.help) {
+    return makeHelp("task");
+  }
+  if (!values.kind?.trim()) {
+    throw new Error("--kind is required");
+  }
+  if (!values["task-id"]?.trim()) {
+    throw new Error("--task-id is required");
+  }
+
+  return {
+    kind: "task",
+    command: "task stop",
+    taskKind: parseEnumValue(values.kind, TASK_KIND_SET, `--kind must be one of ${TASK_KINDS.join(", ")}`),
+    taskId: values["task-id"].trim(),
+    functionKey: values["function-key"] || "",
+    debug: values.debug,
+  };
+}
+
+function parseAuthSetKeyArgs(rest: string[]): AuthSetKeyArgs {
+  const [functionKey] = rest;
+  if (!functionKey?.trim()) {
+    throw new Error("function key is required");
+  }
+  return {
+    kind: "auth",
+    command: "auth set-key",
+    functionKey: functionKey.trim(),
+  };
+}
+
+function parseAuthShowArgs(): AuthShowArgs {
+  return {
+    kind: "auth",
+    command: "auth show",
+  };
+}
+
+function parseAuthClearArgs(): AuthClearArgs {
+  return {
+    kind: "auth",
+    command: "auth clear",
   };
 }
 
@@ -257,10 +418,15 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
     if (!second || second === "--help" || second === "-h") {
       return makeHelp("video");
     }
+    if (second === "generate") {
+      return parseVideoGenerateArgs(rest);
+    }
+    if (second === "download") {
+      return parseVideoDownloadArgs(rest);
+    }
     if (second !== "generate") {
       throw new Error(`Unknown video command: ${second}`);
     }
-    return parseVideoGenerateArgs(rest);
   }
 
   if (first === "text") {
@@ -281,6 +447,32 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
       throw new Error(`Unknown models command: ${second}`);
     }
     return parseModelsListArgs(rest);
+  }
+
+  if (first === "task") {
+    if (!second || second === "--help" || second === "-h") {
+      return makeHelp("task");
+    }
+    if (second !== "stop") {
+      throw new Error(`Unknown task command: ${second}`);
+    }
+    return parseTaskStopArgs(rest);
+  }
+
+  if (first === "auth") {
+    if (!second || second === "--help" || second === "-h") {
+      return makeHelp("auth");
+    }
+    if (second === "set-key") {
+      return parseAuthSetKeyArgs(rest);
+    }
+    if (second === "show") {
+      return parseAuthShowArgs();
+    }
+    if (second === "clear") {
+      return parseAuthClearArgs();
+    }
+    throw new Error(`Unknown auth command: ${second}`);
   }
 
   throw new Error(`Unknown command: ${first}`);

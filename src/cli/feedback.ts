@@ -44,6 +44,10 @@ export function printSavedFile(filePath: string): void {
   console.log(`saved ${relativeToCwd(filePath)}`);
 }
 
+export function printDownloadSkipped(): void {
+  console.log("download skipped");
+}
+
 export function printSummary({
   success,
   failed,
