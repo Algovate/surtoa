@@ -1,28 +1,10 @@
-const DEFAULT_BASE_URL = process.env.SURTOA_BASE_URL || "https://surtoaapi.zeabur.app";
+import type { TextCompletionChunk, TextCompletionOptions } from "../shared/types.js";
+import { buildHeaders, debugLog, DEFAULT_BASE_URL, formatFetchError } from "./shared.js";
+
 const CHAT_COMPLETIONS_ENDPOINT = "/v1/function/chat/completions";
 
-function buildHeaders(functionKey) {
-  return functionKey ? { Authorization: `Bearer ${functionKey}` } : {};
-}
-
-function debugLog(debug, ...args) {
-  if (debug) {
-    console.error("[debug]", ...args);
-  }
-}
-
-function formatFetchError(error, url) {
-  if (!(error instanceof Error)) {
-    return `Request failed for ${url}: ${String(error)}`;
-  }
-  const details = [];
-  if (error.message) details.push(error.message);
-  const cause = error.cause;
-  if (cause && typeof cause === "object") {
-    if ("code" in cause && cause.code) details.push(`cause=${cause.code}`);
-    if ("message" in cause && cause.message) details.push(`detail=${cause.message}`);
-  }
-  return `Request failed for ${url}: ${details.join(" | ") || "unknown fetch error"}`;
+function isTextCompletionChunk(value: unknown): value is TextCompletionChunk {
+  return typeof value === "object" && value !== null;
 }
 
 export async function startTextCompletion({
@@ -35,7 +17,7 @@ export async function startTextCompletion({
   signal,
   onDelta,
   baseUrl = DEFAULT_BASE_URL,
-}) {
+}: TextCompletionOptions): Promise<string> {
   const url = `${baseUrl}${CHAT_COMPLETIONS_ENDPOINT}`;
   const payload = {
     model,
@@ -53,7 +35,7 @@ export async function startTextCompletion({
     hasFunctionKey: Boolean(functionKey),
   });
 
-  let response;
+  let response: Response;
   try {
     response = await fetch(url, {
       method: "POST",
@@ -64,7 +46,7 @@ export async function startTextCompletion({
       body: JSON.stringify(payload),
       signal,
     });
-  } catch (error) {
+  } catch (error: unknown) {
     throw new Error(formatFetchError(error, url));
   }
 
@@ -102,14 +84,17 @@ export async function startTextCompletion({
           return output;
         }
         debugLog(debug, "Chat raw chunk", eventData);
-        let payloadJson;
+        let payloadJson: unknown;
         try {
-          payloadJson = JSON.parse(eventData);
+          payloadJson = JSON.parse(eventData) as unknown;
         } catch {
           continue;
         }
+        if (!isTextCompletionChunk(payloadJson)) {
+          continue;
+        }
 
-        const delta = payloadJson?.choices?.[0]?.delta?.content ?? "";
+        const delta = payloadJson.choices?.[0]?.delta?.content ?? "";
         if (!delta) {
           continue;
         }

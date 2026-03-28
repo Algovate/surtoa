@@ -1,7 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
+import * as path from "node:path";
 
-function stripDataUrlPrefix(value) {
+import type { DecodedImagePayload } from "../shared/types.js";
+
+function stripDataUrlPrefix(value: string): { mime: string | null; payload: string } {
   if (!value.startsWith("data:")) {
     return { mime: null, payload: value };
   }
@@ -19,7 +21,7 @@ function stripDataUrlPrefix(value) {
   };
 }
 
-export function inferImageExtension(raw) {
+export function inferImageExtension(raw: string): string {
   if (!raw) {
     return "jpg";
   }
@@ -39,7 +41,7 @@ export function inferImageExtension(raw) {
   return "jpg";
 }
 
-export function decodeImagePayload(raw) {
+export function decodeImagePayload(raw: string): DecodedImagePayload {
   if (!raw) {
     throw new Error("Image payload is empty");
   }
@@ -55,28 +57,62 @@ export function decodeImagePayload(raw) {
   };
 }
 
-export async function ensureOutputDir(dir) {
+export async function ensureOutputDir(dir: string): Promise<string> {
   await mkdir(dir, { recursive: true });
   return path.resolve(dir);
 }
 
-export function buildImageOutputFilename({ timestamp, taskId, imageId, extension, partial = false }) {
+export function buildImageOutputFilename({
+  timestamp,
+  taskId,
+  imageId,
+  extension,
+  partial = false,
+}: {
+  timestamp: number;
+  taskId: string;
+  imageId: string;
+  extension: string;
+  partial?: boolean;
+}): string {
   const safeTaskId = String(taskId || "unknown");
   const safeImageId = String(imageId || "image").replace(/[^\w.-]+/g, "_");
   const suffix = partial ? "_partial" : "";
   return `imagine_${timestamp}_${safeTaskId}_${safeImageId}${suffix}.${extension}`;
 }
 
-export function buildOutputFilename(args) {
+export function buildOutputFilename(args: {
+  timestamp: number;
+  taskId: string;
+  imageId: string;
+  extension: string;
+  partial?: boolean;
+}): string {
   return buildImageOutputFilename(args);
 }
 
-export function buildVideoOutputFilename({ timestamp, taskId, extension = "mp4" }) {
+export function buildVideoOutputFilename({
+  timestamp,
+  taskId,
+  extension = "mp4",
+}: {
+  timestamp: number;
+  taskId: string;
+  extension?: string;
+}): string {
   const safeTaskId = String(taskId || "unknown").replace(/[^\w.-]+/g, "_");
   return `video_${timestamp}_${safeTaskId}.${extension}`;
 }
 
-export async function saveImagePayload({ raw, outputDir, filename }) {
+export async function saveImagePayload({
+  raw,
+  outputDir,
+  filename,
+}: {
+  raw: string;
+  outputDir: string;
+  filename: string;
+}): Promise<string> {
   const decoded = decodeImagePayload(raw);
   const fullPath = path.join(outputDir, filename);
 
@@ -89,7 +125,15 @@ export async function saveImagePayload({ raw, outputDir, filename }) {
   return fullPath;
 }
 
-export async function saveBinaryUrlToFile({ url, outputDir, filename }) {
+export async function saveBinaryUrlToFile({
+  url,
+  outputDir,
+  filename,
+}: {
+  url: string;
+  outputDir: string;
+  filename: string;
+}): Promise<string> {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to download file: ${response.status} ${response.statusText}`);
@@ -100,7 +144,7 @@ export async function saveBinaryUrlToFile({ url, outputDir, filename }) {
   return fullPath;
 }
 
-function inferMimeTypeFromPath(filePath) {
+function inferMimeTypeFromPath(filePath: string): string {
   const extension = path.extname(filePath).toLowerCase();
   if (extension === ".png") return "image/png";
   if (extension === ".gif") return "image/gif";
@@ -109,13 +153,19 @@ function inferMimeTypeFromPath(filePath) {
   return "application/octet-stream";
 }
 
-export async function toDataUrlFromFile(filePath) {
+export async function toDataUrlFromFile(filePath: string): Promise<string> {
   const buffer = await readFile(filePath);
   const mime = inferMimeTypeFromPath(filePath);
   return `data:${mime};base64,${buffer.toString("base64")}`;
 }
 
-export async function saveTextToFile({ text, outputPath }) {
+export async function saveTextToFile({
+  text,
+  outputPath,
+}: {
+  text: string;
+  outputPath: string;
+}): Promise<string> {
   const fullPath = path.resolve(outputPath);
   const dirPath = path.dirname(fullPath);
   await mkdir(dirPath, { recursive: true });

@@ -1,6 +1,3 @@
-import path from "node:path";
-import process from "node:process";
-
 import {
   buildImageOutputFilename,
   buildVideoOutputFilename,
@@ -10,14 +7,35 @@ import {
   saveImagePayload,
   saveTextToFile,
   toDataUrlFromFile,
-} from "./file-utils.js";
-import { startTask, stopTasks, streamTask } from "./imagine-client.js";
-import { listModels } from "./models-client.js";
-import { startTextCompletion } from "./text-client.js";
-import { startVideoTask, stopVideoTasks, streamVideoTask } from "./video-client.js";
+} from "../utils/file.js";
+import { startTask, stopTasks, streamTask } from "../clients/imagine.js";
+import { listModels } from "../clients/models.js";
+import { startTextCompletion } from "../clients/text.js";
+import { startVideoTask, stopVideoTasks, streamVideoTask } from "../clients/video.js";
+import {
+  printImagePartial,
+  printImageSaved,
+  printResolvedUrl,
+  printSavedFile,
+  printSummary,
+  printTaskError,
+  printTaskStarted,
+  printTaskStopping,
+  printVideoProgress,
+} from "./feedback.js";
 
-function withSignalHandlers(onSignal) {
-  const handler = async () => {
+import type {
+  ChatMessage,
+  FileContentPart,
+  ImageGenerateArgs,
+  ModelsListArgs,
+  TextContentPart,
+  TextGenerateArgs,
+  VideoGenerateArgs,
+} from "../shared/types.js";
+
+function withSignalHandlers(onSignal: () => Promise<void>): () => void {
+  const handler = async (): Promise<void> => {
     await onSignal();
   };
   process.once("SIGINT", handler);
@@ -28,20 +46,29 @@ function withSignalHandlers(onSignal) {
   };
 }
 
-export async function runImageGenerate(options) {
+type RunCounts = {
+  success: number;
+  failed: number;
+};
+
+function createCounts(): RunCounts {
+  return { success: 0, failed: 0 };
+}
+
+export async function runImageGenerate(options: ImageGenerateArgs): Promise<void> {
   const outputDir = await ensureOutputDir(options.out);
   const startedAt = Date.now();
   const timestamp = startedAt;
-  const taskIds = [];
-  const taskAbortControllers = new Map();
-  const savedFinalPaths = new Set();
-  const results = { success: 0, failed: 0 };
+  const taskIds: string[] = [];
+  const taskAbortControllers = new Map<string, AbortController>();
+  const savedFinalPaths = new Set<string>();
+  const results = createCounts();
 
   let shuttingDown = false;
   const restoreSignals = withSignalHandlers(async () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.error("Stopping tasks...");
+    printTaskStopping("tasks");
     for (const controller of taskAbortControllers.values()) {
       controller.abort();
     }
@@ -59,7 +86,7 @@ export async function runImageGenerate(options) {
         debug: options.debug,
       });
       taskIds.push(taskId);
-      console.log(`Started task ${taskId}`);
+      printTaskStarted({ taskId });
     }
 
     await Promise.all(
@@ -82,7 +109,7 @@ export async function runImageGenerate(options) {
             },
             onMessage: async (message) => {
               if (message.type === "error") {
-                console.error(`[${taskId}] ${message.message}`);
+                printTaskError({ taskId }, new Error(message.message));
                 return;
               }
               if (message.type !== "final" && !(message.type === "partial" && options.partialSave)) {
@@ -111,10 +138,10 @@ export async function runImageGenerate(options) {
                   savedFinalPaths.add(fullPath);
                   taskSavedFinal = true;
                   results.success += 1;
-                  console.log(`[${taskId}] saved ${path.relative(process.cwd(), fullPath)}`);
+                  printImageSaved({ taskId }, fullPath);
                 }
               } else {
-                console.log(`[${taskId}] partial ${path.relative(process.cwd(), fullPath)}`);
+                printImagePartial({ taskId }, fullPath);
               }
             },
           });
@@ -122,9 +149,9 @@ export async function runImageGenerate(options) {
           if (!taskSavedFinal) {
             results.failed += 1;
           }
-        } catch (error) {
+        } catch (error: unknown) {
           results.failed += 1;
-          console.error(`[${taskId}] ${error instanceof Error ? error.message : String(error)}`);
+          printTaskError({ taskId }, error);
         } finally {
           taskAbortControllers.delete(taskId);
         }
@@ -136,10 +163,10 @@ export async function runImageGenerate(options) {
   }
 
   const elapsedMs = Date.now() - startedAt;
-  console.log(`Done. success=${results.success} failed=${results.failed} elapsed=${elapsedMs}ms output=${outputDir}`);
+  printSummary({ success: results.success, failed: results.failed, elapsedMs, outputDir });
 }
 
-export async function runVideoGenerate(options) {
+export async function runVideoGenerate(options: VideoGenerateArgs): Promise<void> {
   const outputDir = await ensureOutputDir(options.out);
   const startedAt = Date.now();
   const imageUrls = options.imageFiles.length
@@ -156,7 +183,7 @@ export async function runVideoGenerate(options) {
     functionKey: options.functionKey,
     debug: options.debug,
   });
-  console.log(`Started task ${taskId}`);
+  printTaskStarted({ taskId });
 
   const controller = new AbortController();
   let lastProgressKey = "";
@@ -169,7 +196,7 @@ export async function runVideoGenerate(options) {
   const restoreSignals = withSignalHandlers(async () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.error("Stopping task...");
+    printTaskStopping("task");
     controller.abort();
     await stopVideoTasks({ taskIds: [taskId], functionKey: options.functionKey, debug: options.debug });
     process.exitCode = 1;
@@ -191,20 +218,16 @@ export async function runVideoGenerate(options) {
             return;
           }
           lastProgressKey = progressKey;
-          if (event.round !== null && event.roundCount !== null) {
-            console.log(`progress [round ${event.round}/${event.roundCount}]=${event.progress}%`);
-            return;
-          }
-          console.log(`progress=${event.progress}%`);
+          printVideoProgress(event.progress, event.round, event.roundCount);
           return;
         }
         if (event.type === "status") {
           console.log(event.message);
           return;
         }
-        if (event.type === "resolved" && event.url && event.url !== resolvedUrl) {
+        if (event.type === "resolved" && event.url !== resolvedUrl) {
           resolvedUrl = event.url;
-          console.log(`resolved ${resolvedUrl}`);
+          printResolvedUrl(resolvedUrl);
         }
       },
     });
@@ -219,22 +242,22 @@ export async function runVideoGenerate(options) {
         filename,
       });
       success = 1;
-      console.log(`saved ${path.relative(process.cwd(), fullPath)}`);
+      printSavedFile(fullPath);
     }
-  } catch (error) {
+  } catch (error: unknown) {
     failed = 1;
-    console.error(`[${taskId}] ${error instanceof Error ? error.message : String(error)}`);
+    printTaskError({ taskId }, error);
   } finally {
     restoreSignals();
     await stopVideoTasks({ taskIds: [taskId], functionKey: options.functionKey, debug: options.debug });
   }
 
   const elapsedMs = Date.now() - startedAt;
-  console.log(`Done. success=${success} failed=${failed} elapsed=${elapsedMs}ms output=${outputDir}`);
+  printSummary({ success, failed, elapsedMs, outputDir });
 }
 
-async function buildTextMessages(options) {
-  const messages = [];
+async function buildTextMessages(options: TextGenerateArgs): Promise<ChatMessage[]> {
+  const messages: ChatMessage[] = [];
   if (options.system) {
     messages.push({ role: "system", content: options.system });
   }
@@ -245,7 +268,7 @@ async function buildTextMessages(options) {
   }
 
   const fileData = await toDataUrlFromFile(options.file);
-  const content = [];
+  const content: Array<TextContentPart | FileContentPart> = [];
   if (options.prompt) {
     content.push({ type: "text", text: options.prompt });
   }
@@ -259,7 +282,7 @@ async function buildTextMessages(options) {
   return messages;
 }
 
-export async function runTextGenerate(options) {
+export async function runTextGenerate(options: TextGenerateArgs): Promise<void> {
   const messages = await buildTextMessages(options);
   const controller = new AbortController();
   let output = "";
@@ -290,9 +313,9 @@ export async function runTextGenerate(options) {
 
     if (options.out) {
       const savedPath = await saveTextToFile({ text: output, outputPath: options.out });
-      console.log(`saved ${path.relative(process.cwd(), savedPath)}`);
+      printSavedFile(savedPath);
     }
-  } catch (error) {
+  } catch (error: unknown) {
     if (aborted) {
       if (output && !output.endsWith("\n")) {
         process.stdout.write("\n");
@@ -306,7 +329,7 @@ export async function runTextGenerate(options) {
   }
 }
 
-export async function runModelsList(options) {
+export async function runModelsList(options: ModelsListArgs): Promise<void> {
   const { payload, items } = await listModels({
     functionKey: options.functionKey,
     debug: options.debug,

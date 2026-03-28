@@ -1,31 +1,17 @@
-const DEFAULT_BASE_URL = process.env.SURTOA_BASE_URL || "https://surtoaapi.zeabur.app";
+import type { VideoProgressInfo, VideoResolvedInfo, VideoStreamEvent } from "../shared/types.js";
+import { buildHeaders, debugLog, DEFAULT_BASE_URL, formatFetchError } from "./shared.js";
+
 const DEFAULT_REASONING_EFFORT = "low";
 
-function buildHeaders(functionKey) {
-  return functionKey ? { Authorization: `Bearer ${functionKey}` } : {};
-}
-
-function debugLog(debug, ...args) {
-  if (debug) {
-    console.error("[debug]", ...args);
-  }
-}
-
-function formatFetchError(error, url) {
-  if (!(error instanceof Error)) {
-    return `Request failed for ${url}: ${String(error)}`;
-  }
-  const details = [];
-  if (error.message) details.push(error.message);
-  const cause = error.cause;
-  if (cause && typeof cause === "object") {
-    if ("code" in cause && cause.code) details.push(`cause=${cause.code}`);
-    if ("message" in cause && cause.message) details.push(`detail=${cause.message}`);
-  }
-  return `Request failed for ${url}: ${details.join(" | ") || "unknown fetch error"}`;
-}
-
-function buildSseUrl({ taskId, functionKey, baseUrl }) {
+function buildSseUrl({
+  taskId,
+  functionKey,
+  baseUrl,
+}: {
+  taskId: string;
+  functionKey?: string;
+  baseUrl: string;
+}): URL {
   const url = new URL(`${baseUrl}/v1/function/video/sse`);
   url.searchParams.set("task_id", taskId);
   url.searchParams.set("t", String(Date.now()));
@@ -35,7 +21,7 @@ function buildSseUrl({ taskId, functionKey, baseUrl }) {
   return url;
 }
 
-export function extractVideoInfo(buffer) {
+export function extractVideoInfo(buffer: string): VideoResolvedInfo | null {
   if (!buffer) return null;
 
   const htmlMatches = buffer.match(/<video[\s\S]*?<\/video>/gi);
@@ -54,7 +40,7 @@ export function extractVideoInfo(buffer) {
 
   const mdMatches = [...buffer.matchAll(/\[video\]\(([^)]+)\)/g)];
   if (mdMatches.length) {
-    return { url: mdMatches[mdMatches.length - 1][1] };
+    return { url: mdMatches[mdMatches.length - 1]?.[1] };
   }
 
   const urlMatches = buffer.match(/https?:\/\/[^\s<)]+/g);
@@ -65,10 +51,11 @@ export function extractVideoInfo(buffer) {
   return null;
 }
 
-export function parseDeltaProgress(text) {
+export function parseDeltaProgress(text: string): VideoProgressInfo | null {
   const roundMatches = [...text.matchAll(/\[round=(\d+)\/(\d+)\]\s*progress=([0-9]+(?:\.[0-9]+)?)%/g)];
   if (roundMatches.length) {
     const match = roundMatches[roundMatches.length - 1];
+    if (!match) return null;
     return {
       progress: Math.round(Number.parseFloat(match[3])),
       round: Number.parseInt(match[1], 10),
@@ -77,16 +64,20 @@ export function parseDeltaProgress(text) {
   }
   const genericMatches = [...text.matchAll(/progress=([0-9]+(?:\.[0-9]+)?)%/g)];
   if (genericMatches.length) {
+    const match = genericMatches[genericMatches.length - 1];
+    if (!match) return null;
     return {
-      progress: Math.round(Number.parseFloat(genericMatches[genericMatches.length - 1][1])),
+      progress: Math.round(Number.parseFloat(match[1])),
       round: null,
       roundCount: null,
     };
   }
   const zhMatches = [...text.matchAll(/进度\s*(\d+)%/g)];
   if (zhMatches.length) {
+    const match = zhMatches[zhMatches.length - 1];
+    if (!match) return null;
     return {
-      progress: Number.parseInt(zhMatches[zhMatches.length - 1][1], 10),
+      progress: Number.parseInt(match[1], 10),
       round: null,
       roundCount: null,
     };
@@ -104,7 +95,17 @@ export async function startVideoTask({
   functionKey,
   debug = false,
   baseUrl = DEFAULT_BASE_URL,
-}) {
+}: {
+  prompt: string;
+  imageUrls: string[];
+  aspectRatio: string;
+  videoLength: number;
+  resolutionName: string;
+  preset: string;
+  functionKey?: string;
+  debug?: boolean;
+  baseUrl?: string;
+}): Promise<string> {
   const url = `${baseUrl}/v1/function/video/start`;
   debugLog(debug, "POST /v1/function/video/start", {
     prompt,
@@ -115,7 +116,7 @@ export async function startVideoTask({
     preset,
     hasFunctionKey: Boolean(functionKey),
   });
-  let response;
+  let response: Response;
   try {
     response = await fetch(url, {
       method: "POST",
@@ -133,7 +134,7 @@ export async function startVideoTask({
         preset,
       }),
     });
-  } catch (error) {
+  } catch (error: unknown) {
     throw new Error(formatFetchError(error, url));
   }
 
@@ -143,16 +144,27 @@ export async function startVideoTask({
     throw new Error(body || `Failed to create video task (${response.status})`);
   }
 
-  const json = await response.json();
-  debugLog(debug, "video start response", json);
-  if (!json?.task_id) {
+  const json = (await response.json()) as unknown;
+  if (!json || typeof json !== "object" || !("task_id" in json) || typeof json.task_id !== "string") {
+    debugLog(debug, "video start response", json);
     throw new Error("Missing task_id in video start response");
   }
+  debugLog(debug, "video start response", json);
   return String(json.task_id);
 }
 
-export async function stopVideoTasks({ taskIds, functionKey, debug = false, baseUrl = DEFAULT_BASE_URL }) {
-  if (!taskIds?.length) return;
+export async function stopVideoTasks({
+  taskIds,
+  functionKey,
+  debug = false,
+  baseUrl = DEFAULT_BASE_URL,
+}: {
+  taskIds: string[];
+  functionKey?: string;
+  debug?: boolean;
+  baseUrl?: string;
+}): Promise<void> {
+  if (!taskIds.length) return;
   const url = `${baseUrl}/v1/function/video/stop`;
   try {
     debugLog(debug, "POST /v1/function/video/stop", { taskIds });
@@ -164,7 +176,7 @@ export async function stopVideoTasks({ taskIds, functionKey, debug = false, base
       },
       body: JSON.stringify({ task_ids: taskIds }),
     });
-  } catch (error) {
+  } catch (error: unknown) {
     debugLog(debug, "video stop error", formatFetchError(error, url));
   }
 }
@@ -176,16 +188,23 @@ export async function streamVideoTask({
   debug = false,
   onEvent,
   baseUrl = DEFAULT_BASE_URL,
-}) {
+}: {
+  taskId: string;
+  functionKey?: string;
+  signal?: AbortSignal;
+  debug?: boolean;
+  onEvent: (event: VideoStreamEvent) => void | Promise<void>;
+  baseUrl?: string;
+}): Promise<void> {
   const url = buildSseUrl({ taskId, functionKey, baseUrl });
   debugLog(debug, "Video SSE connect", url.toString());
-  let response;
+  let response: Response;
   try {
     response = await fetch(url, {
       headers: { Accept: "text/event-stream" },
       signal,
     });
-  } catch (error) {
+  } catch (error: unknown) {
     throw new Error(formatFetchError(error, url.toString()));
   }
 
@@ -221,20 +240,32 @@ export async function streamVideoTask({
         return;
       }
 
-      let payload;
+      let payload: unknown;
       try {
-        payload = JSON.parse(eventData);
+        payload = JSON.parse(eventData) as unknown;
       } catch {
         continue;
       }
+      if (!payload || typeof payload !== "object") {
+        continue;
+      }
 
-      if (payload?.error) {
+      if ("error" in payload && typeof payload.error === "string") {
         await Promise.resolve(onEvent({ type: "error", message: payload.error }));
         throw new Error(payload.error);
       }
 
-      const choice = payload?.choices?.[0];
-      const deltaContent = choice?.delta?.content || "";
+      const choice =
+        "choices" in payload && Array.isArray(payload.choices)
+          ? payload.choices[0]
+          : undefined;
+      const delta =
+        choice && typeof choice === "object" && "delta" in choice && choice.delta && typeof choice.delta === "object"
+          ? choice.delta
+          : undefined;
+      const deltaContent =
+        delta && "content" in delta && typeof delta.content === "string" ? delta.content : "";
+
       if (deltaContent) {
         const progressInfo = parseDeltaProgress(deltaContent);
         if (progressInfo !== null) {
@@ -252,7 +283,11 @@ export async function streamVideoTask({
         }
       }
 
-      if (choice?.finish_reason === "stop") {
+      const finishReason =
+        choice && typeof choice === "object" && "finish_reason" in choice && typeof choice.finish_reason === "string"
+          ? choice.finish_reason
+          : null;
+      if (finishReason === "stop") {
         debugLog(debug, "Video SSE finish_reason=stop", taskId);
         return;
       }

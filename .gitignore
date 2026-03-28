@@ -1,8 +1,11 @@
 node_modules/
-
+dist/
 output/
 
 .DS_Store
+
+coverage/
+*.tsbuildinfo
 
 npm-debug.log*
 yarn-debug.log*

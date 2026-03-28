@@ -1,56 +1,79 @@
-const DEFAULT_BASE_URL = process.env.SURTOA_BASE_URL || "https://surtoaapi.zeabur.app";
+import type { NormalizedImageMessage, StartTaskPayload, StreamTaskMode } from "../shared/types.js";
+import { buildHeaders, debugLog, DEFAULT_BASE_URL, formatFetchError } from "./shared.js";
+
 const WS_OPEN_TIMEOUT_MS = 1500;
 
-function buildHeaders(functionKey) {
-  return functionKey ? { Authorization: `Bearer ${functionKey}` } : {};
-}
-
-function normalizeMessage(rawMessage, taskId) {
+function normalizeMessage(rawMessage: unknown, taskId: string): NormalizedImageMessage | null {
   if (!rawMessage || typeof rawMessage !== "object") {
     return null;
   }
 
-  if (rawMessage.type === "image_generation.partial_image" || rawMessage.type === "image_generation.completed") {
+  const message = rawMessage as Record<string, unknown>;
+  const type = typeof message.type === "string" ? message.type : undefined;
+  const stage = typeof message.stage === "string" ? message.stage : undefined;
+  const imageId =
+    typeof message.image_id === "string"
+      ? message.image_id
+      : typeof message.imageId === "string"
+        ? message.imageId
+        : null;
+  const payload =
+    typeof message.b64_json === "string"
+      ? message.b64_json
+      : typeof message.url === "string"
+        ? message.url
+        : typeof message.image === "string"
+          ? message.image
+          : null;
+  const elapsedMs = typeof message.elapsed_ms === "number" ? message.elapsed_ms : null;
+
+  if (type === "image_generation.partial_image" || type === "image_generation.completed") {
     return {
-      type: rawMessage.type === "image_generation.completed" || rawMessage.stage === "final" ? "final" : "partial",
+      type: type === "image_generation.completed" || stage === "final" ? "final" : "partial",
       taskId,
-      imageId: rawMessage.image_id || rawMessage.imageId || null,
-      payload: rawMessage.b64_json || rawMessage.url || rawMessage.image || null,
-      elapsedMs: rawMessage.elapsed_ms ?? null,
+      imageId,
+      payload,
+      elapsedMs,
       raw: rawMessage,
     };
   }
 
-  if (rawMessage.type === "image") {
+  if (type === "image") {
     return {
       type: "final",
       taskId,
-      imageId: rawMessage.image_id || rawMessage.imageId || `legacy-${Date.now()}`,
-      payload: rawMessage.b64_json || rawMessage.url || rawMessage.image || null,
-      elapsedMs: rawMessage.elapsed_ms ?? null,
+      imageId: imageId || `legacy-${Date.now()}`,
+      payload,
+      elapsedMs,
       raw: rawMessage,
     };
   }
 
-  if (rawMessage.type === "status") {
+  if (type === "status") {
     return {
       type: "status",
       taskId,
-      status: rawMessage.status || "unknown",
-      runId: rawMessage.run_id || null,
+      status: typeof message.status === "string" ? message.status : "unknown",
+      runId: typeof message.run_id === "string" ? message.run_id : null,
       raw: rawMessage,
     };
   }
 
-  if (rawMessage.type === "error" || rawMessage.error) {
+  const errorValue = message.error;
+  if (type === "error" || errorValue) {
+    const nestedErrorMessage =
+      errorValue && typeof errorValue === "object" && "message" in errorValue && typeof errorValue.message === "string"
+        ? errorValue.message
+        : typeof errorValue === "string"
+          ? errorValue
+          : null;
     return {
       type: "error",
       taskId,
-      imageId: rawMessage.image_id || rawMessage.imageId || null,
+      imageId,
       message:
-        rawMessage.message ||
-        rawMessage.error?.message ||
-        rawMessage.error ||
+        (typeof message.message === "string" ? message.message : null) ||
+        nestedErrorMessage ||
         "Unknown imagine error",
       raw: rawMessage,
     };
@@ -59,50 +82,16 @@ function normalizeMessage(rawMessage, taskId) {
   return null;
 }
 
-function parseJsonSafely(raw) {
+function parseJsonSafely(raw: string): unknown {
   try {
-    return JSON.parse(raw);
+    return JSON.parse(raw) as unknown;
   } catch {
     return null;
   }
 }
 
-function debugLog(debug, ...args) {
-  if (debug) {
-    console.error("[debug]", ...args);
-  }
-}
 
-function formatFetchError(error, url) {
-  if (!(error instanceof Error)) {
-    return `Request failed for ${url}: ${String(error)}`;
-  }
-
-  const details = [];
-  if (error.message) {
-    details.push(error.message);
-  }
-
-  const cause = error.cause;
-  if (cause) {
-    if (typeof cause === "object") {
-      const causeCode = "code" in cause ? cause.code : undefined;
-      const causeMessage = "message" in cause ? cause.message : undefined;
-      if (causeCode) {
-        details.push(`cause=${causeCode}`);
-      }
-      if (causeMessage) {
-        details.push(`detail=${causeMessage}`);
-      }
-    } else {
-      details.push(`cause=${String(cause)}`);
-    }
-  }
-
-  return `Request failed for ${url}: ${details.join(" | ") || "unknown fetch error"}`;
-}
-
-async function readSocketMessageData(data) {
+async function readSocketMessageData(data: unknown): Promise<string> {
   if (typeof data === "string") {
     return data;
   }
@@ -129,10 +118,17 @@ export async function startTask({
   functionKey,
   baseUrl = DEFAULT_BASE_URL,
   debug = false,
-}) {
+}: {
+  prompt: string;
+  aspectRatio: string;
+  nsfw: boolean;
+  functionKey?: string;
+  baseUrl?: string;
+  debug?: boolean;
+}): Promise<string> {
   const url = `${baseUrl}/v1/function/imagine/start`;
   debugLog(debug, "POST /v1/function/imagine/start", { prompt, aspectRatio, nsfw, hasFunctionKey: Boolean(functionKey) });
-  let response;
+  let response: Response;
   try {
     response = await fetch(url, {
       method: "POST",
@@ -146,7 +142,7 @@ export async function startTask({
         nsfw,
       }),
     });
-  } catch (error) {
+  } catch (error: unknown) {
     debugLog(debug, "start fetch error", error);
     throw new Error(formatFetchError(error, url));
   }
@@ -157,17 +153,27 @@ export async function startTask({
     throw new Error(body || `Failed to create task (${response.status})`);
   }
 
-  const json = await response.json();
+  const json = (await response.json()) as unknown;
   debugLog(debug, "start response", json);
-  if (!json?.task_id) {
+  if (!json || typeof json !== "object" || !("task_id" in json)) {
     throw new Error("Missing task_id in imagine start response");
   }
 
   return String(json.task_id);
 }
 
-export async function stopTasks({ taskIds, functionKey, baseUrl = DEFAULT_BASE_URL, debug = false }) {
-  if (!taskIds?.length) {
+export async function stopTasks({
+  taskIds,
+  functionKey,
+  baseUrl = DEFAULT_BASE_URL,
+  debug = false,
+}: {
+  taskIds: string[];
+  functionKey?: string;
+  baseUrl?: string;
+  debug?: boolean;
+}): Promise<void> {
+  if (!taskIds.length) {
     return;
   }
 
@@ -182,13 +188,20 @@ export async function stopTasks({ taskIds, functionKey, baseUrl = DEFAULT_BASE_U
       },
       body: JSON.stringify({ task_ids: taskIds }),
     });
-  } catch (error) {
+  } catch (error: unknown) {
     debugLog(debug, "stop fetch error", formatFetchError(error, url));
-    // Best effort cleanup.
   }
 }
 
-function buildWsUrl({ taskId, functionKey, baseUrl }) {
+function buildWsUrl({
+  taskId,
+  functionKey,
+  baseUrl,
+}: {
+  taskId: string;
+  functionKey?: string;
+  baseUrl: string;
+}): URL {
   const url = new URL(`${baseUrl}/v1/function/imagine/ws`);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("task_id", taskId);
@@ -198,7 +211,15 @@ function buildWsUrl({ taskId, functionKey, baseUrl }) {
   return url;
 }
 
-function buildSseUrl({ taskId, functionKey, baseUrl }) {
+function buildSseUrl({
+  taskId,
+  functionKey,
+  baseUrl,
+}: {
+  taskId: string;
+  functionKey?: string;
+  baseUrl: string;
+}): URL {
   const url = new URL(`${baseUrl}/v1/function/imagine/sse`);
   url.searchParams.set("task_id", taskId);
   url.searchParams.set("t", String(Date.now()));
@@ -208,7 +229,23 @@ function buildSseUrl({ taskId, functionKey, baseUrl }) {
   return url;
 }
 
-async function streamViaWebSocket({ taskId, functionKey, baseUrl, onMessage, signal, startPayload, debug }) {
+async function streamViaWebSocket({
+  taskId,
+  functionKey,
+  baseUrl,
+  onMessage,
+  signal,
+  startPayload,
+  debug,
+}: {
+  taskId: string;
+  functionKey?: string;
+  baseUrl: string;
+  onMessage: (message: NormalizedImageMessage) => void | Promise<void>;
+  signal?: AbortSignal;
+  startPayload?: StartTaskPayload;
+  debug: boolean;
+}): Promise<void> {
   return new Promise((resolve, reject) => {
     const wsUrl = buildWsUrl({ taskId, functionKey, baseUrl });
     debugLog(debug, "WS connect", wsUrl.toString());
@@ -216,13 +253,13 @@ async function streamViaWebSocket({ taskId, functionKey, baseUrl, onMessage, sig
     let settled = false;
     let open = false;
 
-    const cleanup = () => {
+    const cleanup = (): void => {
       if (signal) {
         signal.removeEventListener("abort", abortHandler);
       }
     };
 
-    const finish = (fn, value) => {
+    const finishResolve = (): void => {
       if (settled) {
         return;
       }
@@ -233,10 +270,24 @@ async function streamViaWebSocket({ taskId, functionKey, baseUrl, onMessage, sig
       } catch {
         // ignore
       }
-      fn(value);
+      resolve();
     };
 
-    const abortHandler = () => finish(resolve);
+    const finishReject = (error: Error): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      try {
+        ws.close();
+      } catch {
+        // ignore
+      }
+      reject(error);
+    };
+
+    const abortHandler = (): void => finishResolve();
     if (signal) {
       signal.addEventListener("abort", abortHandler, { once: true });
     }
@@ -244,7 +295,7 @@ async function streamViaWebSocket({ taskId, functionKey, baseUrl, onMessage, sig
     const timer = setTimeout(() => {
       if (!open && !settled) {
         debugLog(debug, "WS open timeout", taskId);
-        finish(reject, new Error("WS_OPEN_TIMEOUT"));
+        finishReject(new Error("WS_OPEN_TIMEOUT"));
       }
     }, WS_OPEN_TIMEOUT_MS);
 
@@ -270,57 +321,75 @@ async function streamViaWebSocket({ taskId, functionKey, baseUrl, onMessage, sig
       }
     });
 
-    ws.addEventListener("message", async (event) => {
-      const raw = await readSocketMessageData(event.data);
-      debugLog(debug, "WS raw message", raw);
-      const payload = parseJsonSafely(raw);
-      const normalized = normalizeMessage(payload, taskId);
-      if (!normalized) {
-        debugLog(debug, "WS message ignored", taskId);
-        return;
-      }
-      debugLog(debug, "WS normalized", normalized);
-      await Promise.resolve(onMessage(normalized));
-      if (
-        normalized.type === "final" ||
-        (normalized.type === "status" && normalized.status === "stopped")
-      ) {
-        finish(resolve);
-      } else if (normalized.type === "error") {
-        finish(reject, new Error(normalized.message));
-      }
+    ws.addEventListener("message", (event) => {
+      void (async () => {
+        const raw = await readSocketMessageData(event.data);
+        debugLog(debug, "WS raw message", raw);
+        const payload = parseJsonSafely(raw);
+        const normalized = normalizeMessage(payload, taskId);
+        if (!normalized) {
+          debugLog(debug, "WS message ignored", taskId);
+          return;
+        }
+        debugLog(debug, "WS normalized", normalized);
+        await Promise.resolve(onMessage(normalized));
+        if (
+          normalized.type === "final" ||
+          (normalized.type === "status" && normalized.status === "stopped")
+        ) {
+          finishResolve();
+        } else if (normalized.type === "error") {
+          finishReject(new Error(normalized.message));
+        }
+      })().catch((error: unknown) => {
+        finishReject(error instanceof Error ? error : new Error(String(error)));
+      });
     });
 
     ws.addEventListener("error", () => {
       clearTimeout(timer);
       debugLog(debug, "WS error", taskId);
       if (!open) {
-        finish(reject, new Error("WS_CONNECTION_ERROR"));
+        finishReject(new Error("WS_CONNECTION_ERROR"));
         return;
       }
-      finish(reject, new Error(`WebSocket stream failed for task ${taskId}`));
+      finishReject(new Error(`WebSocket stream failed for task ${taskId}`));
     });
 
     ws.addEventListener("close", () => {
       clearTimeout(timer);
       debugLog(debug, "WS close", taskId);
       if (!settled) {
-        finish(resolve);
+        finishResolve();
       }
     });
   });
 }
 
-async function streamViaSse({ taskId, functionKey, baseUrl, onMessage, signal, debug }) {
+async function streamViaSse({
+  taskId,
+  functionKey,
+  baseUrl,
+  onMessage,
+  signal,
+  debug,
+}: {
+  taskId: string;
+  functionKey?: string;
+  baseUrl: string;
+  onMessage: (message: NormalizedImageMessage) => void | Promise<void>;
+  signal?: AbortSignal;
+  debug: boolean;
+}): Promise<void> {
   const sseUrl = buildSseUrl({ taskId, functionKey, baseUrl });
   debugLog(debug, "SSE connect", sseUrl.toString());
-  let response;
+  let response: Response;
   try {
     response = await fetch(sseUrl, {
       headers: { Accept: "text/event-stream" },
       signal,
     });
-  } catch (error) {
+  } catch (error: unknown) {
     throw new Error(formatFetchError(error, sseUrl.toString()));
   }
 
@@ -384,7 +453,16 @@ export async function streamTask({
   startPayload,
   debug = false,
   baseUrl = DEFAULT_BASE_URL,
-}) {
+}: {
+  taskId: string;
+  mode: StreamTaskMode;
+  functionKey?: string;
+  onMessage: (message: NormalizedImageMessage) => void | Promise<void>;
+  signal?: AbortSignal;
+  startPayload?: StartTaskPayload;
+  debug?: boolean;
+  baseUrl?: string;
+}): Promise<void> {
   if (mode === "ws") {
     await streamViaWebSocket({ taskId, functionKey, baseUrl, onMessage, signal, startPayload, debug });
     return;
@@ -397,7 +475,7 @@ export async function streamTask({
 
   try {
     await streamViaWebSocket({ taskId, functionKey, baseUrl, onMessage, signal, startPayload, debug });
-  } catch (error) {
+  } catch (error: unknown) {
     if (error instanceof Error && (error.message === "WS_OPEN_TIMEOUT" || error.message === "WS_CONNECTION_ERROR")) {
       debugLog(debug, "Auto fallback to SSE", taskId, error.message);
       await streamViaSse({ taskId, functionKey, baseUrl, onMessage, signal, debug });

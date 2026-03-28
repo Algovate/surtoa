@@ -15,10 +15,22 @@ Current commands:
 
 ## Install
 
+Install dependencies:
+
+```bash
+npm install
+```
+
+Build the CLI:
+
+```bash
+npm run build
+```
+
 Run directly from the repo:
 
 ```bash
-node bin/imagine.js --help
+node dist/bin/imagine.js --help
 ```
 
 Or link the binary locally:
@@ -35,7 +47,7 @@ imagine --help
 Generate images from the `/v1/function/imagine/*` endpoints.
 
 ```bash
-node bin/imagine.js image generate \
+node dist/bin/imagine.js image generate \
   --prompt "future city at night, neon rain, cinematic" \
   --ratio 2:3 \
   --count 1 \
@@ -64,7 +76,7 @@ Notes:
 Generate videos from the `/v1/function/video/*` endpoints.
 
 ```bash
-node bin/imagine.js video generate \
+node dist/bin/imagine.js video generate \
   --prompt "a red apple slowly rotating on a wooden table" \
   --ratio 3:2 \
   --length 6 \
@@ -78,7 +90,7 @@ Reference images can be passed either as URLs or local files.
 URL example:
 
 ```bash
-node bin/imagine.js video generate \
+node dist/bin/imagine.js video generate \
   --prompt "@图1 street at night, slow camera push" \
   --image-url "https://example.com/ref.jpg"
 ```
@@ -86,7 +98,7 @@ node bin/imagine.js video generate \
 Local file example:
 
 ```bash
-node bin/imagine.js video generate \
+node dist/bin/imagine.js video generate \
   --prompt "@图1 street at night, slow camera push" \
   --image-file ./ref1.jpg \
   --image-file ./ref2.png
@@ -115,14 +127,14 @@ Notes:
 Generate text from the `/v1/function/chat/completions` endpoint.
 
 ```bash
-node bin/imagine.js text generate \
+node dist/bin/imagine.js text generate \
   --prompt "用一句话介绍你自己"
 ```
 
 With system prompt:
 
 ```bash
-node bin/imagine.js text generate \
+node dist/bin/imagine.js text generate \
   --prompt "写一个三行简介" \
   --system "你是一个简洁的中文写作助手"
 ```
@@ -130,7 +142,7 @@ node bin/imagine.js text generate \
 With output file:
 
 ```bash
-node bin/imagine.js text generate \
+node dist/bin/imagine.js text generate \
   --prompt "写一个三行简介" \
   --out ./output/result.txt
 ```
@@ -138,7 +150,7 @@ node bin/imagine.js text generate \
 With local file attachment:
 
 ```bash
-node bin/imagine.js text generate \
+node dist/bin/imagine.js text generate \
   --prompt "总结这个文件内容" \
   --file ./notes.png
 ```
@@ -165,13 +177,13 @@ Notes:
 List models from `/v1/models`.
 
 ```bash
-node bin/imagine.js models list --function-key YOUR_KEY
+node dist/bin/imagine.js models list --function-key YOUR_KEY
 ```
 
 JSON output:
 
 ```bash
-node bin/imagine.js models list --function-key YOUR_KEY --json
+node dist/bin/imagine.js models list --function-key YOUR_KEY --json
 ```
 
 Options:
@@ -190,6 +202,18 @@ Generated files are typically written under `./output` by default:
 
 ## Development
 
+Type-check:
+
+```bash
+npm run typecheck
+```
+
+Build:
+
+```bash
+npm run build
+```
+
 Run tests:
 
 ```bash
@@ -199,9 +223,21 @@ npm test
 Show command help:
 
 ```bash
-node bin/imagine.js
-node bin/imagine.js image generate --help
-node bin/imagine.js video generate --help
-node bin/imagine.js text generate --help
-node bin/imagine.js models list --help
+node dist/bin/imagine.js
+node dist/bin/imagine.js image generate --help
+node dist/bin/imagine.js video generate --help
+node dist/bin/imagine.js text generate --help
+node dist/bin/imagine.js models list --help
+```
+
+## Source Layout
+
+```text
+src/
+  cli/       command parsing, help, and command runners
+  clients/   API clients for imagine, video, text, and models
+  shared/    shared TypeScript types
+  utils/     filesystem helpers
+bin/         CLI entrypoint
+test/        node:test suites
 ```

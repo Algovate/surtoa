@@ -4,10 +4,22 @@
   "description": "CLI for generating images via Surtoa imagine endpoints",
   "type": "module",
   "bin": {
-    "imagine": "./bin/imagine.js"
+    "imagine": "./dist/bin/imagine.js"
   },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
   "scripts": {
-    "test": "node --test"
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "prepare": "npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/**/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.8.3"
   },
   "engines": {
     "node": ">=22"

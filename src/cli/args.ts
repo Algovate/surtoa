@@ -1,20 +1,41 @@
 import { parseArgs } from "node:util";
+import {
+  DEFAULT_TEXT_MODEL,
+  IMAGE_MODES,
+  IMAGE_RATIOS,
+  MAX_VIDEO_REFERENCES,
+  VIDEO_PRESETS,
+  VIDEO_RATIOS,
+  VIDEO_RESOLUTIONS,
+} from "./config.js";
 
-const IMAGE_RATIOS = new Set(["2:3", "1:1", "3:2", "16:9", "9:16"]);
-const IMAGE_MODES = new Set(["auto", "ws", "sse"]);
-const VIDEO_RATIOS = new Set(["3:2", "2:3", "16:9", "9:16", "1:1"]);
-const VIDEO_RESOLUTIONS = new Set(["480p", "720p"]);
-const VIDEO_PRESETS = new Set(["normal", "fun", "spicy", "custom"]);
-const MAX_VIDEO_REFERENCES = 7;
-const DEFAULT_TEXT_MODEL = "grok-4.20-beta";
+import type {
+  HelpCommand,
+  ImageGenerateArgs,
+  ImageMode,
+  ImageRatio,
+  ModelsListArgs,
+  ParsedCliArgs,
+  TextGenerateArgs,
+  VideoGenerateArgs,
+  VideoPreset,
+  VideoRatio,
+  VideoResolution,
+} from "../shared/types.js";
 
-function parseBoolean(value, flagName) {
+const IMAGE_RATIO_SET = new Set<ImageRatio>(IMAGE_RATIOS);
+const IMAGE_MODE_SET = new Set<ImageMode>(IMAGE_MODES);
+const VIDEO_RATIO_SET = new Set<VideoRatio>(VIDEO_RATIOS);
+const VIDEO_RESOLUTION_SET = new Set<VideoResolution>(VIDEO_RESOLUTIONS);
+const VIDEO_PRESET_SET = new Set<VideoPreset>(VIDEO_PRESETS);
+
+function parseBoolean(value: string, flagName: string): boolean {
   if (value === "true") return true;
   if (value === "false") return false;
   throw new Error(`${flagName} must be true or false`);
 }
 
-function parseCount(value) {
+function parseCount(value: string): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 3) {
     throw new Error("--count must be an integer from 1 to 3");
@@ -22,7 +43,7 @@ function parseCount(value) {
   return parsed;
 }
 
-function parseVideoLength(value) {
+function parseVideoLength(value: string): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed < 6 || parsed > 30) {
     throw new Error("--length must be an integer from 6 to 30");
@@ -30,7 +51,7 @@ function parseVideoLength(value) {
   return parsed;
 }
 
-function parseFloatRange(value, flagName, min, max) {
+function parseFloatRange(value: string, flagName: string, min: number, max: number): number {
   const parsed = Number.parseFloat(value);
   if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
     throw new Error(`${flagName} must be a number from ${min} to ${max}`);
@@ -38,12 +59,23 @@ function parseFloatRange(value, flagName, min, max) {
   return parsed;
 }
 
-function normalizeList(value) {
+function normalizeList(value: string | string[] | undefined): string[] {
   if (value === undefined) return [];
   return Array.isArray(value) ? value : [value];
 }
 
-function parseImageGenerateArgs(rest) {
+function parseEnumValue<T extends string>(value: string, allowed: ReadonlySet<T>, errorMessage: string): T {
+  if (!allowed.has(value as T)) {
+    throw new Error(errorMessage);
+  }
+  return value as T;
+}
+
+function makeHelp(topic: HelpCommand["topic"]): HelpCommand {
+  return { help: true, topic };
+}
+
+function parseImageGenerateArgs(rest: string[]): ImageGenerateArgs | HelpCommand {
   const { values } = parseArgs({
     args: rest,
     allowPositionals: false,
@@ -61,34 +93,27 @@ function parseImageGenerateArgs(rest) {
   });
 
   if (values.help) {
-    return { help: true, topic: "image" };
+    return makeHelp("image");
   }
   if (!values.prompt?.trim()) {
     throw new Error("--prompt is required");
   }
-  if (!IMAGE_RATIOS.has(values.ratio)) {
-    throw new Error("--ratio must be one of 2:3, 1:1, 3:2, 16:9, 9:16");
-  }
-  if (!IMAGE_MODES.has(values.mode)) {
-    throw new Error("--mode must be one of auto, ws, sse");
-  }
-
   return {
     kind: "image",
     command: "image generate",
     prompt: values.prompt.trim(),
-    ratio: values.ratio,
+    ratio: parseEnumValue(values.ratio, IMAGE_RATIO_SET, `--ratio must be one of ${IMAGE_RATIOS.join(", ")}`),
     count: parseCount(values.count),
     nsfw: parseBoolean(values.nsfw, "--nsfw"),
     out: values.out,
     functionKey: values["function-key"] || "",
-    mode: values.mode,
+    mode: parseEnumValue(values.mode, IMAGE_MODE_SET, `--mode must be one of ${IMAGE_MODES.join(", ")}`),
     partialSave: false,
     debug: values.debug,
   };
 }
 
-function parseVideoGenerateArgs(rest) {
+function parseVideoGenerateArgs(rest: string[]): VideoGenerateArgs | HelpCommand {
   const { values } = parseArgs({
     args: rest,
     allowPositionals: false,
@@ -108,21 +133,11 @@ function parseVideoGenerateArgs(rest) {
   });
 
   if (values.help) {
-    return { help: true, topic: "video" };
+    return makeHelp("video");
   }
   if (!values.prompt?.trim()) {
     throw new Error("--prompt is required");
   }
-  if (!VIDEO_RATIOS.has(values.ratio)) {
-    throw new Error("--ratio must be one of 3:2, 2:3, 16:9, 9:16, 1:1");
-  }
-  if (!VIDEO_RESOLUTIONS.has(values.resolution)) {
-    throw new Error("--resolution must be one of 480p, 720p");
-  }
-  if (!VIDEO_PRESETS.has(values.preset)) {
-    throw new Error("--preset must be one of normal, fun, spicy, custom");
-  }
-
   const imageUrls = normalizeList(values["image-url"]);
   const imageFiles = normalizeList(values["image-file"]);
   if (imageUrls.length && imageFiles.length) {
@@ -136,10 +151,14 @@ function parseVideoGenerateArgs(rest) {
     kind: "video",
     command: "video generate",
     prompt: values.prompt.trim(),
-    ratio: values.ratio,
+    ratio: parseEnumValue(values.ratio, VIDEO_RATIO_SET, `--ratio must be one of ${VIDEO_RATIOS.join(", ")}`),
     length: parseVideoLength(values.length),
-    resolution: values.resolution,
-    preset: values.preset,
+    resolution: parseEnumValue(
+      values.resolution,
+      VIDEO_RESOLUTION_SET,
+      `--resolution must be one of ${VIDEO_RESOLUTIONS.join(", ")}`,
+    ),
+    preset: parseEnumValue(values.preset, VIDEO_PRESET_SET, `--preset must be one of ${VIDEO_PRESETS.join(", ")}`),
     out: values.out,
     functionKey: values["function-key"] || "",
     imageUrls,
@@ -148,7 +167,7 @@ function parseVideoGenerateArgs(rest) {
   };
 }
 
-function parseTextGenerateArgs(rest) {
+function parseTextGenerateArgs(rest: string[]): TextGenerateArgs | HelpCommand {
   const { values } = parseArgs({
     args: rest,
     allowPositionals: false,
@@ -167,7 +186,7 @@ function parseTextGenerateArgs(rest) {
   });
 
   if (values.help) {
-    return { help: true, topic: "text" };
+    return makeHelp("text");
   }
   if (!values.prompt?.trim()) {
     throw new Error("--prompt is required");
@@ -192,7 +211,7 @@ function parseTextGenerateArgs(rest) {
   };
 }
 
-function parseModelsListArgs(rest) {
+function parseModelsListArgs(rest: string[]): ModelsListArgs | HelpCommand {
   const { values } = parseArgs({
     args: rest,
     allowPositionals: false,
@@ -205,7 +224,7 @@ function parseModelsListArgs(rest) {
   });
 
   if (values.help) {
-    return { help: true, topic: "models" };
+    return makeHelp("models");
   }
 
   return {
@@ -217,16 +236,16 @@ function parseModelsListArgs(rest) {
   };
 }
 
-export function parseCliArgs(argv) {
+export function parseCliArgs(argv: string[]): ParsedCliArgs {
   const [first, second, ...rest] = argv;
 
   if (!first || first === "--help" || first === "-h") {
-    return { help: true, topic: "root" };
+    return makeHelp("root");
   }
 
   if (first === "image") {
     if (!second || second === "--help" || second === "-h") {
-      return { help: true, topic: "image" };
+      return makeHelp("image");
     }
     if (second !== "generate") {
       throw new Error(`Unknown image command: ${second}`);
@@ -236,7 +255,7 @@ export function parseCliArgs(argv) {
 
   if (first === "video") {
     if (!second || second === "--help" || second === "-h") {
-      return { help: true, topic: "video" };
+      return makeHelp("video");
     }
     if (second !== "generate") {
       throw new Error(`Unknown video command: ${second}`);
@@ -246,7 +265,7 @@ export function parseCliArgs(argv) {
 
   if (first === "text") {
     if (!second || second === "--help" || second === "-h") {
-      return { help: true, topic: "text" };
+      return makeHelp("text");
     }
     if (second !== "generate") {
       throw new Error(`Unknown text command: ${second}`);
@@ -256,7 +275,7 @@ export function parseCliArgs(argv) {
 
   if (first === "models") {
     if (!second || second === "--help" || second === "-h") {
-      return { help: true, topic: "models" };
+      return makeHelp("models");
     }
     if (second !== "list") {
       throw new Error(`Unknown models command: ${second}`);

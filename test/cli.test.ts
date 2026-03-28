@@ -1,10 +1,10 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import * as assert from "node:assert/strict";
 import { mkdtemp, writeFile } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
+import * as os from "node:os";
+import * as path from "node:path";
+import { test } from "node:test";
 
-import { parseCliArgs } from "../src/cli.js";
+import { parseCliArgs } from "../src/cli/index.js";
 import {
   buildImageOutputFilename,
   buildOutputFilename,
@@ -12,10 +12,10 @@ import {
   inferImageExtension,
   saveTextToFile,
   toDataUrlFromFile,
-} from "../src/file-utils.js";
-import { extractVideoInfo, parseDeltaProgress } from "../src/video-client.js";
-import { listModels } from "../src/models-client.js";
-import { startTextCompletion } from "../src/text-client.js";
+} from "../src/utils/file.js";
+import { listModels } from "../src/clients/models.js";
+import { startTextCompletion } from "../src/clients/text.js";
+import { extractVideoInfo, parseDeltaProgress } from "../src/clients/video.js";
 
 test("parseCliArgs requires prompt", () => {
   assert.throws(() => parseCliArgs(["image", "generate"]), /--prompt is required/);
@@ -41,12 +41,18 @@ test("parseCliArgs rejects removed generate alias", () => {
 
 test("parseCliArgs supports image subcommand", () => {
   const parsed = parseCliArgs(["image", "generate", "--prompt", "cat"]);
+  if ("help" in parsed || parsed.kind !== "image") {
+    throw new Error("expected image command");
+  }
   assert.equal(parsed.kind, "image");
   assert.equal(parsed.command, "image generate");
 });
 
 test("parseCliArgs supports video subcommand", () => {
   const parsed = parseCliArgs(["video", "generate", "--prompt", "clip"]);
+  if ("help" in parsed || parsed.kind !== "video") {
+    throw new Error("expected video command");
+  }
   assert.equal(parsed.kind, "video");
   assert.equal(parsed.ratio, "3:2");
   assert.equal(parsed.length, 6);
@@ -78,6 +84,9 @@ test("parseCliArgs validates video preset", () => {
 
 test("parseCliArgs supports text subcommand", () => {
   const parsed = parseCliArgs(["text", "generate", "--prompt", "hello"]);
+  if ("help" in parsed || parsed.kind !== "text") {
+    throw new Error("expected text command");
+  }
   assert.equal(parsed.kind, "text");
   assert.equal(parsed.model, "grok-4.20-beta");
   assert.equal(parsed.temperature, 0.8);
@@ -117,6 +126,9 @@ test("parseCliArgs validates max one text file", () => {
 
 test("parseCliArgs supports models list subcommand", () => {
   const parsed = parseCliArgs(["models", "list"]);
+  if ("help" in parsed || parsed.kind !== "models") {
+    throw new Error("expected models command");
+  }
   assert.equal(parsed.kind, "models");
   assert.equal(parsed.command, "models list");
   assert.equal(parsed.json, false);
@@ -225,7 +237,7 @@ test("startTextCompletion streams and concatenates deltas", async () => {
       { status: 200 },
     );
 
-  const seen = [];
+  const seen: string[] = [];
   try {
     const result = await startTextCompletion({
       model: "grok-4.20-beta",
